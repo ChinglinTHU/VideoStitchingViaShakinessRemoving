@@ -20,16 +20,16 @@ classdef VideoStitch2 < handle
         
         % correspondence
         maxppf;
-        ppf; % points per frame
+        ppf; % points per frame 每一幀中匹配的特徵點
         CP; % Control Points
         CPgrid;
-        validCP; 
+        validCP; % 有效的匹配特徵點數目
         nCP;
-        nCPgrid;
+        nCPgrid; % 網格中有的特徵點的數目
         CPthreshold;
         
         % optimization parameters
-        span;
+        span; % 前後幀數的padding
         smoothness;
         cropping;
         stitchness;
@@ -112,6 +112,7 @@ classdef VideoStitch2 < handle
             obj.quadWidth = obj.videoWidth / obj.meshSize;
             
             for frameIndex = 1:obj.nFrames
+            % pa pb pacol pbcol parow pbrow 都是特徵點的情況，pa pb是座標，row col 是所在網格信息
                 pa = squeeze(obj.CP(frameIndex, 1:obj.ppf(frameIndex), 1:2));
                 pb = squeeze(obj.CP(frameIndex, 1:obj.ppf(frameIndex), 3:4));
                 
@@ -123,7 +124,7 @@ classdef VideoStitch2 < handle
                 for CPindex = 1:obj.ppf(frameIndex)
                     ra = parow(CPindex); ca = pacol(CPindex);
                     rb = pbrow(CPindex); cb = pbcol(CPindex);
-                    
+                    % 統計每一個網格中的特徵點數目
                     obj.nCPgrid(frameIndex, ra, ca, 1) = obj.nCPgrid(frameIndex, ra, ca, 1) + 1;
                     obj.CPgrid(frameIndex, ra, ca, obj.nCPgrid(frameIndex, ra, ca, 1), 1) = CPindex;
                     
@@ -196,12 +197,14 @@ classdef VideoStitch2 < handle
             end
             obj.calcOmega();
             obj.H = eye(3);
+            
+            % 總共有多少特徵點，在所有的幀中
             obj.nCP = sum(obj.ppf);
             fprintf('Number of Valid Control Points :%5d\n', obj.nCP);
         end
         
         function updateOffset(obj)
-            B = zeros(obj.nFrames, 3, 3);
+            B = zeros(obj.nFrames, 3, 3)；
             ms = obj.meshSize;
             for frameIndex = 1:obj.nFrames
                 for row = 1:ms
@@ -212,6 +215,7 @@ classdef VideoStitch2 < handle
                 end
             end
             nf = obj.nFrames;
+            % offset 所為何物 為一矩陣
             offset = squeeze(sum(B(:, :, :)) / nf / (ms * ms));
 %             offset = eye(3);
             t = floor(obj.nFrames * 0.5);
@@ -234,6 +238,7 @@ classdef VideoStitch2 < handle
             obj.Offset = ha / offset;
         end
         
+        % 這是添加周圍八個（或者其它）網格約束的項目 添加的項目是p/c，也就是b
         function value = getCoherenceTerm(obj, ab, P, row, col, frameIndex)
             value = 0;
             if ab == 'a'
@@ -314,12 +319,15 @@ classdef VideoStitch2 < handle
             end
             
         end
-        
+        % 優化相機路徑核心算法
         function optPath(obj, maxIte, secondPhase)
             % zero round
             firstround = maxIte - secondPhase;
             % parameters
+            
+            % 第一次分開優化相機路徑時候得到的結果
             inMaxIte = 10; % number of innner-iteration for the first outer-iteration
+            
             asap_1 = 0.6;
             asap_2 = 0.3;
             boost_non_commmon = 5;
@@ -328,26 +336,32 @@ classdef VideoStitch2 < handle
             for ite = 1:maxIte
                 fprintf('\nRound#%2d ', ite);                
                 if ite > 1
+                % 分為兩個迭代求解步驟
                     inMaxIte = 3;
+                    % 第二階段的迭代
                     if ite > firstround
                         asaplambda = asap_2;
                         inMaxIte = 1;
                         obj.stableW = 30; % 20-40 is OK, larger for more regidity.
                     else
+                    % 第一階段的迭代
                         asaplambda = asap_1;
                     end
                     tic;
+                    
                     parfor frameIndex = 1:obj.nFrames
                         CPcount = 0;
                         PAa = zeros(obj.ppf(frameIndex), 2);
                         PBa = zeros(obj.ppf(frameIndex), 2);
                         PAb = zeros(obj.ppf(frameIndex), 2);
                         PBb = zeros(obj.ppf(frameIndex), 2);
+                        % 最初始的B矩陣
                         Ba = zeros(obj.meshSize, obj.meshSize, 3, 3);
                         Bb = Ba;
                         
                         for row = 1:obj.meshSize
                             for col = 1:obj.meshSize
+                            % B = P/C
                                 Ba(row, col, :, :) = squeeze(obj.Pa(frameIndex, row, col, :, :)) / squeeze(obj.Ca(frameIndex, row, col, :, :));
                                 Bb(row, col, :, :) = squeeze(obj.Pb(frameIndex, row, col, :, :)) / squeeze(obj.Cb(frameIndex, row, col, :, :));
                             end
@@ -370,13 +384,18 @@ classdef VideoStitch2 < handle
                                 PBb(CPcount, :) = pb;
                                 [PAb(CPcount, 1), PAb(CPcount, 2)] = obj.transform(pa, obj.H \ squeeze(Ba(rowa, cola, :, :)));    
                             end
-                        end                            
+                        end
+                        % 計算新的變換矩陣
                         PaStitch(frameIndex, :, :, :, :) = NewWarping(PAa, PBa, obj.videoHeight, obj.videoWidth, obj.quadHeight, obj.quadWidth, asaplambda);
                         PbStitch(frameIndex, :, :, :, :) = NewWarping(PBb, PAb, obj.videoHeight, obj.videoWidth, obj.quadHeight, obj.quadWidth, asaplambda);
                     end
                     toc; 
                 end
+                
+                
                 obj.calcOmega();
+                
+                % 通過迭代進行計算
                 for inIte = 1:inMaxIte
                     fprintf('.');
                     oPa = obj.Pa;
@@ -393,12 +412,18 @@ classdef VideoStitch2 < handle
                                 crop_fix = 1 * ( - obj.nFrames + frameIndex + obj.span);
                             end
                         end
-                        
+                        % 作者設定的是col和row相同，這裡是訪問每一個網格
                         for row = 1:obj.meshSize
                             for col = 1:obj.meshSize
                                 head = max(frameIndex - obj.span, 1);
                                 tail = min(frameIndex + obj.span, obj.nFrames);
                                 nn = tail - head + 1;
+                                % nn就是長度
+                                
+                                
+                                % 对于头和尾的处理就是填补，缺少多少，填补多少
+                                
+                                
                                 % Pat - Cat
                                 value = squeeze(obj.Pa(frameIndex, row, col, :, :)) * (crop_fix + 1);                            
                                 % Pat - Par
@@ -414,12 +439,15 @@ classdef VideoStitch2 < handle
                                 if ite == 1
                                     obj.Pa(frameIndex, row, col, :, :) = value / (crop_fix + obj.gamma_a(frameIndex, row, col));
                                 end
+                                
                                 if ite <= firstround && ite > 1
                                     value = value + squeeze(PaStitch(frameIndex, row, col, :, :)) * squeeze(obj.Ca(frameIndex, row, col, :, :)) * stitching;
                                     obj.Pa(frameIndex, row, col, :, :) = value / (crop_fix + obj.gamma_a(frameIndex, row, col) + stitching);
                                 end
+                                
                                 if ite > firstround && obj.nCPgrid(frameIndex, row, col, 1) > 10
                                     value = value + squeeze(PaStitch(frameIndex, row, col, :, :)) * squeeze(obj.Ca(frameIndex, row, col, :, :)) * stitching * boost_non_commmon;
+                                    % 優化得到的結果
                                     obj.Pa(frameIndex, row, col, :, :) = value / (crop_fix + obj.gamma_a(frameIndex, row, col) + stitching * boost_non_commmon);
                                 end
                                 
@@ -435,17 +463,24 @@ classdef VideoStitch2 < handle
                                 value = value + 2 * obj.smoothness * reshape(weight * n9, [3, 3]);
 
                                 value = value + obj.getCoherenceTerm('b', oPb, row, col, frameIndex);
+                                
+                                % 初始化的時候
                                 if ite == 1
                                     obj.Pb(frameIndex, row, col, :, :) = value / (crop_fix + obj.gamma_b(frameIndex, row, col));
-                                end                                
+                                end
+                                
+                                % 第一階段的優化
                                 if ite <= firstround && ite > 1 
                                     value = value + squeeze(PbStitch(frameIndex, row, col, :, :)) * squeeze(obj.Cb(frameIndex, row, col, :, :)) * stitching;
                                     obj.Pb(frameIndex, row, col, :, :) = value / (crop_fix + obj.gamma_b(frameIndex, row, col) + stitching);
-                                end                                
+                                end
+                                
+                                % 第二階段的優化
                                 if ite > firstround && obj.nCPgrid(frameIndex, row, col, 2) > 10
                                     value = value + squeeze(PbStitch(frameIndex, row, col, :, :)) * squeeze(obj.Cb(frameIndex, row, col, :, :)) * stitching * boost_non_commmon;                                    
                                     obj.Pb(frameIndex, row, col, :, :) = value / (crop_fix + obj.gamma_b(frameIndex, row, col) + stitching * boost_non_commmon);
                                 end
+                                
                                 if ite > firstround && obj.nCPgrid(frameIndex, row, col, 2) <= 10
                                     value = value + squeeze(PbStitch(frameIndex, row, col, :, :)) * squeeze(obj.Cb(frameIndex, row, col, :, :)) * stitching * boost_commmon;                                    
                                     obj.Pb(frameIndex, row, col, :, :) = value / (crop_fix + obj.gamma_b(frameIndex, row, col) + stitching * boost_commmon);
@@ -454,12 +489,16 @@ classdef VideoStitch2 < handle
                             end
                         end
                     end
-                end                
+                end
+                
+                % 更新H矩陣，找到變換後的特徵點，直接求解一個全局但應矩陣
                 obj.updateH_simple();
+                % 更新camera path
                 obj.updateCP();
             end
         end
         
+        % 簡單通過Pa Ca 得到優化後的特偵點座標 Pb Cb得到 用ransac方式尋找新的H
         function updateH_simple(obj)
             % compute H from Pa Ca Pb Cb and CP 
             PA = zeros(2, obj.ppf(obj.span+1) + obj.ppf(obj.span+2));
@@ -472,14 +511,18 @@ classdef VideoStitch2 < handle
                     end
                     if obj.validCP(frameIndex, k) == 1
                         %xa, ya, xb, yb;
+                        
+                        % 獲取
                         pb = obj.CP(frameIndex, k, 3:4);
                         colb = floor((pb(1) - 0.001) / obj.quadWidth) + 1;
                         rowb = floor((pb(2) - 0.001) / obj.quadHeight) + 1;
                         Bb = squeeze(obj.Pb(frameIndex, rowb, colb, :, :)) / squeeze(obj.Cb(frameIndex, rowb, colb, :, :));
+                        
                         pa = obj.CP(frameIndex, k, 1:2);
                         cola = floor((pa(1) - 0.001) / obj.quadWidth) + 1;
                         rowa = floor((pa(2) - 0.001) / obj.quadHeight) + 1; 
                         Ba = squeeze(obj.Pa(frameIndex, rowa, cola, :, :)) / squeeze(obj.Ca(frameIndex, rowa, cola, :, :));
+                        
                         CPcount = CPcount + 1;
                         [PA(1, CPcount), PA(2, CPcount)] = obj.transform(pa, Ba);
                         [PB(1, CPcount), PB(2, CPcount)] = obj.transform(pb, Bb);
