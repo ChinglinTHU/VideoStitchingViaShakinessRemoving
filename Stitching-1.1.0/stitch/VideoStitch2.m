@@ -493,7 +493,7 @@ classdef VideoStitch2 < handle
                 
                 % 更新H矩陣，找到變換後的特徵點，直接求解一個全局但應矩陣
                 obj.updateH_simple();
-                % 更新camera path
+                % 更新control points
                 obj.updateCP();
             end
         end
@@ -533,7 +533,7 @@ classdef VideoStitch2 < handle
             obj.H = obj.H / obj.H(3, 3);
             obj.H = obj.H ^ (-1);
         end
-        
+        % 這裡是更新控制點，不是路徑
         function updateCP(obj)
             % set validCp and ppf according to H
             obj.ppf = zeros(obj.nFrames, 1);
