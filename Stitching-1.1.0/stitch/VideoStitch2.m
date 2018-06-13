@@ -19,22 +19,22 @@ classdef VideoStitch2 < handle
         quadWidth;
         
         % correspondence
-        maxppf;
+        maxppf; %max points per frame 每一幀中最多的特徵點
         ppf; % points per frame 每一幀中匹配的特徵點
         CP; % Control Points
         CPgrid;
         validCP; % 有效的匹配特徵點數目
-        nCP;
+        nCP; % 每一幀中的控制點（匹配的特徵點）
         nCPgrid; % 網格中有的特徵點的數目
-        CPthreshold;
+        CPthreshold; % 控制點的 閾值
         
         % optimization parameters
         span; % 前後幀數的padding
-        smoothness;
+        smoothness; % 平滑參數
         cropping;
-        stitchness;
-        stableW;
-        gap;
+        stitchness; % 拼接參數 beta
+        stableW; % 穩定參數 lambad
+        gap; % 每一幅圖周圍的padding
         
         % Optimization data
         Pa;
